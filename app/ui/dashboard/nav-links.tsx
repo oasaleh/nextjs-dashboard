@@ -1,3 +1,4 @@
+// This became a client side component because it uses the next/navigation hook.
 "use client";
 
 import {
