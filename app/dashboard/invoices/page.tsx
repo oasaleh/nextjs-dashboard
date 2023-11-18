@@ -12,7 +12,7 @@ export default async function Page({
 }: {
   searchParams?: { query?: string; page?: string };
 }) {
-  console.log(searchParams);
+  // console.log(searchParams);
   const query = searchParams?.query || "";
   const currentPage = parseInt(searchParams?.page || "1");
 

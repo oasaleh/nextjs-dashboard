@@ -5,15 +5,30 @@ import { sql } from "@vercel/postgres";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-const formSchema = z.object({
+const FormSchema = z.object({
   id: z.string().optional(),
-  customerId: z.string(),
-  amount: z.coerce.number(),
-  status: z.enum(["paid", "pending"]),
+  customerId: z.string({ invalid_type_error: "Please select a customer." }),
+  amount: z.coerce
+    .number()
+    .gt(0, { message: "Please enter an amount greater than $0." }),
+  status: z.enum(["paid", "pending"], {
+    invalid_type_error: "Please select an invoice status.",
+  }),
   date: z.string().optional(),
 });
 
-export async function createInvoice(formData: FormData) {
+export type State = {
+  errors?: {
+    customerId?: string[];
+    amount?: string[];
+    status?: string[];
+  };
+  message?: string | null;
+};
+
+const CreateInvoice = FormSchema.omit({ id: true, date: true });
+
+export async function createInvoice(prevState: State, formData: FormData) {
   // 2-step validation:
   // const rawFormData = {
   //   customerId: formData.get("customerId"),
@@ -23,22 +38,72 @@ export async function createInvoice(formData: FormData) {
 
   // const validatedFormData = formSchema.parse(rawFormData);
 
-  // 1-step validation:
-  const { customerId, amount, status } = formSchema.parse(
-    Object.fromEntries(formData)
-  );
+  // Another way to do it:
+  const validatedFields = CreateInvoice.safeParse({
+    customerId: formData.get("customerId"),
+    amount: formData.get("amount"),
+    status: formData.get("status"),
+  });
 
-  // Change the amount to cents.
+  // If form validation fails, return errors early. Otherwise, continue.
+  if (!validatedFields.success) {
+    // console.log(validatedFields.error.flatten().fieldErrors);
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+      message: "Missing Fields. Failed to Create Invoice.",
+    };
+  }
+
+  const { customerId, amount, status } = validatedFields.data;
   const amountInCents = amount * 100;
-
-  // Create the date.
   const date = new Date().toISOString().split("T")[0];
 
-  await sql`
-    INSERT INTO invoices (customer_id, amount, status, date)
-    VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
-  `;
+  try {
+    await sql`
+      INSERT INTO invoices (customer_id, amount, status, date)
+      VALUES (${customerId}, ${amountInCents}, ${status}, ${date})
+      `;
+  } catch (error) {
+    return { message: "Database Error: Failed to create invoice." };
+  }
 
   revalidatePath("/dashboard/invoices");
   redirect("/dashboard/invoices");
+}
+
+export async function updateInvoice(id: string, formData: FormData) {
+  const { customerId, amount, status } = FormSchema.parse(
+    Object.fromEntries(formData)
+  );
+
+  const amountInCents = amount * 100;
+
+  try {
+    await sql`
+  UPDATE invoices
+  SET
+    customer_id = ${customerId},
+    amount = ${amountInCents},
+    status = ${status}
+  WHERE id = ${id}
+`;
+  } catch (error) {
+    return { message: "Database Error: Failed to update invoice." };
+  }
+
+  revalidatePath("/dashboard/invoices");
+  redirect("/dashboard/invoices");
+}
+
+export async function deleteInvoice(id: string) {
+  // throw new Error("Failed to Delete Invoice");
+
+  try {
+    await sql`DELETE FROM invoices WHERE id = ${id}`;
+    revalidatePath("/dashboard/invoices");
+    return { message: "Deleted Invoice." };
+  } catch (error) {
+    return { message: "Database Error: Failed to delete invoice." };
+  }
+  revalidatePath("/dashboard/invoices");
 }
